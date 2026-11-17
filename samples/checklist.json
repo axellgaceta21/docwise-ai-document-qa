@@ -1,0 +1,6 @@
+[
+  {"id": "R-01", "title": "Design pressure", "reference_text": "Design pressure: 150 kPa."},
+  {"id": "R-02", "title": "Operating temperature", "reference_text": "Operating temperature: 80 C."},
+  {"id": "R-03", "title": "Pipe material", "reference_text": "Pipe material: ASTM A106 Grade B carbon steel."},
+  {"id": "R-04", "title": "Inspection method", "reference_text": "Inspection method: visual inspection and hydrostatic test."}
+]

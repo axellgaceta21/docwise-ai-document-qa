@@ -1,0 +1,43 @@
+services:
+  - type: web
+    name: docwise-api
+    runtime: python
+    plan: starter
+    region: singapore
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips '*'
+    healthCheckPath: /api/health
+    disk:
+      name: docwise-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: DOCWISE_ENV
+        value: production
+      - key: DOCWISE_SESSION_SECRET
+        generateValue: true
+      - key: DOCWISE_CORS_ORIGINS
+        sync: false
+      - key: DOCUMENT_QA_DB_PATH
+        value: /var/data/docwise.sqlite3
+      - key: DOCWISE_RETENTION_DAYS
+        value: "30"
+      - key: DOCWISE_MAX_REQUEST_BYTES
+        value: "23068672"
+      - key: DOCWISE_RATE_LIMIT_PER_MINUTE
+        value: "120"
+      - key: DOCWISE_IP_RATE_LIMIT_PER_MINUTE
+        value: "300"
+      - key: DOCWISE_DAILY_COMPARISONS_PER_VISITOR
+        value: "10"
+      - key: DOCWISE_DAILY_COMPARISONS_PER_IP
+        value: "30"
+      - key: DOCWISE_DAILY_GROQ_PER_VISITOR
+        value: "3"
+      - key: DOCWISE_DAILY_GROQ_PER_IP
+        value: "10"
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-20b
