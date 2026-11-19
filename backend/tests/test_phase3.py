@@ -1,6 +1,7 @@
 import hashlib
 import json
-import sqlite3
+import os
+import psycopg
 from types import SimpleNamespace
 
 import pymupdf
@@ -72,7 +73,7 @@ def test_database_persistence_review_audit_and_report(monkeypatch, tmp_path):
     finding_id = body["findings"][0]["id"]
     assert session_id and finding_id and body["findings"][0]["review_status"] == "pending"
     assert body["findings"][0]["status"] == "missing"
-    db = sqlite3.connect(tmp_path / "qa.sqlite3")
+    db = psycopg.connect(os.environ["TEST_DATABASE_URL"])
     rows = db.execute("SELECT role, sha256 FROM documents ORDER BY role").fetchall()
     assert rows == [("reference", hashlib.sha256(reference).hexdigest()),
                     ("submitted", hashlib.sha256(submitted).hexdigest())]
@@ -131,7 +132,7 @@ def test_cache_hit_force_refresh_and_no_double_count(monkeypatch, tmp_path):
     assert "Historical finding decision: Not an issue" in report_text
     assert "No corresponding submitted-document excerpt" in report_text
     assert "AI interpretation requires more evidence" in report_text
-    db = sqlite3.connect(tmp_path / "qa.sqlite3")
+    db = psycopg.connect(os.environ["TEST_DATABASE_URL"])
     assert db.execute("SELECT COUNT(*) FROM ai_cache").fetchone()[0] == 1
     assert db.execute("SELECT SUM(total_tokens) FROM sessions").fetchone()[0] == 220
     db.close()
@@ -180,6 +181,6 @@ def test_valid_missing_clause_cites_approved_reference_and_cache_not_created_on_
     assert finding["source_document"] == "reference" and finding["page_number"] == 1
     assert finding["supporting_excerpt"] == CHECKLIST[0]["reference_text"]
     assert finding["review_status"] == "pending" and finding["uncertain"]
-    db = sqlite3.connect(tmp_path / "qa.sqlite3")
+    db = psycopg.connect(os.environ["TEST_DATABASE_URL"])
     assert db.execute("SELECT COUNT(*) FROM ai_cache").fetchone()[0] == 1
     db.close()

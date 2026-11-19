@@ -76,7 +76,7 @@ def test_legacy_unowned_comparison_is_not_visible():
     client = TestClient(app)
     result = compare(client).json()
     with database() as connection:
-        connection.execute("UPDATE sessions SET owner_id=NULL WHERE id=?", (result["session_id"],))
+        connection.execute("UPDATE sessions SET owner_id=NULL WHERE id=%s", (result["session_id"],))
     assert client.get(f"/api/comparisons/{result['session_id']}").status_code == 404
     assert all(item["session_id"] != result["session_id"] for item in client.get("/api/comparisons").json())
 
@@ -86,12 +86,12 @@ def test_retention_cleanup_removes_expired_sessions_and_related_records():
     result = compare(client).json()
     session_id = result["session_id"]
     with database() as connection:
-        connection.execute("UPDATE sessions SET created_at='2000-01-01T00:00:00+00:00' WHERE id=?",
+        connection.execute("UPDATE sessions SET created_at='2000-01-01T00:00:00+00:00' WHERE id=%s",
                            (session_id,))
     cleaned = cleanup_expired_data(30)
     assert cleaned["sessions"] == 1
     with database() as connection:
-        assert connection.execute("SELECT COUNT(*) FROM documents WHERE session_id=?", (session_id,)).fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) AS count FROM documents WHERE session_id=%s", (session_id,)).fetchone()["count"] == 0
 
 
 def test_owner_can_download_report_and_revision_but_other_visitor_cannot():

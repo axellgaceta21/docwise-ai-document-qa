@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import os
-import sqlite3
 import time
 from contextlib import asynccontextmanager
 from typing import Literal
@@ -11,6 +10,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import TypeAdapter, ValidationError
+import psycopg
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .comparison import compare
@@ -44,8 +44,8 @@ async def _retention_worker(retention_days: int) -> None:
         await asyncio.sleep(24 * 60 * 60)
         try:
             await asyncio.to_thread(cleanup_expired_data, retention_days)
-        except sqlite3.Error:
-            logger.exception("Scheduled privacy-retention cleanup failed")
+        except psycopg.Error:
+            logger.error("Scheduled privacy-retention cleanup failed")
             raise
 
 
@@ -192,8 +192,8 @@ def health() -> dict[str, str]:
     try:
         with database() as connection:
             connection.execute("SELECT 1").fetchone()
-    except sqlite3.Error as exc:
-        logger.exception("Health check could not reach SQLite")
+    except (psycopg.Error, RuntimeError) as exc:
+        logger.error("Health check could not reach PostgreSQL")
         raise HTTPException(503, "Database is unavailable") from exc
     return {"status": "ok", "database": "ok"}
 

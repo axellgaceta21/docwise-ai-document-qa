@@ -1,6 +1,7 @@
 """Human correction and structured revision workflow; never calls Groq."""
 import json
-import sqlite3
+import os
+import psycopg
 
 import pymupdf
 from fastapi.testclient import TestClient
@@ -56,15 +57,15 @@ def test_correction_migration_and_review_gate(tmp_path):
     session = result["session_id"]
     finding = result["findings"][0]
     assert correction(session, finding).status_code == 409
-    db_path = tmp_path / "qa.sqlite3"
-    before = db_path.read_bytes()
+    with psycopg.connect(os.environ["TEST_DATABASE_URL"]) as db:
+        before = db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
     init_db()
     init_db()
-    with sqlite3.connect(db_path) as db:
-        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    with psycopg.connect(os.environ["TEST_DATABASE_URL"]) as db:
+        tables = {row[0] for row in db.execute("SELECT tablename FROM pg_tables WHERE schemaname=current_schema()")}
         assert {"sessions", "findings", "ai_cache", "corrections", "revisions"} <= tables
         assert db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
-    assert before  # Existing database was not reset.
+    assert before == 1  # Existing data survives repeated initialization.
     assert client.patch(f"/api/comparisons/{session}/findings/{finding['id']}/review",
                         json={"status": "accepted", "comment": "Confirmed mismatch."}).status_code == 200
     assert correction(session, finding, corrected="   ").status_code == 422

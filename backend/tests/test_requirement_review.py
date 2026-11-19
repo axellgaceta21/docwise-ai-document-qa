@@ -1,6 +1,7 @@
 """Requirement-level review keeps old finding decisions as evidence."""
 import json
-import sqlite3
+import os
+import psycopg
 from uuid import uuid4
 
 import pymupdf
@@ -76,7 +77,7 @@ def test_one_final_decision_persists_and_preserves_findings(tmp_path):
     transitions = [event for event in reopened["audit_events"] if event["action"] == "requirement_review_updated"]
     assert [(item["old_status"], item["new_status"]) for item in transitions] == [
         ("pending", "accepted"), ("accepted", "rejected")]
-    with sqlite3.connect(tmp_path / "qa.sqlite3") as db:
+    with psycopg.connect(os.environ["TEST_DATABASE_URL"]) as db:
         assert db.execute("SELECT COUNT(*) FROM requirement_reviews").fetchone()[0] == 1
         assert db.execute("SELECT COUNT(*) FROM corrections").fetchone()[0] == 1
     report = client.get(f"/api/comparisons/{session}/report")
@@ -99,10 +100,10 @@ def test_conflicting_legacy_decisions_are_flagged_and_not_overwritten(tmp_path):
         "citation_verified": True, "review_status": "pending", "review_comment": "",
     }
     init_db()
-    with sqlite3.connect(tmp_path / "qa.sqlite3") as db:
+    with psycopg.connect(os.environ["TEST_DATABASE_URL"]) as db:
         db.execute("""INSERT INTO findings
             (id, session_id, requirement_id, kind, payload_json, review_status, review_comment, position)
-            VALUES (?, ?, ?, 'ai', ?, 'pending', '', 0)""",
+            VALUES (%s, %s, %s, 'ai', %s, 'pending', '', 0)""",
             (ai_id, session, "R-01", json.dumps(payload)))
     client.patch(f"/api/comparisons/{session}/findings/{deterministic}/review",
                  json={"status": "accepted", "comment": "Old document decision."})
@@ -132,10 +133,10 @@ def test_ai_concern_on_deterministic_match_requires_one_final_review(tmp_path):
         "supporting_excerpt": CHECKLIST[1]["reference_text"], "uncertain": True,
         "citation_verified": True, "review_status": "pending", "review_comment": "",
     }
-    with sqlite3.connect(tmp_path / "qa.sqlite3") as db:
+    with psycopg.connect(os.environ["TEST_DATABASE_URL"]) as db:
         db.execute("""INSERT INTO findings
             (id, session_id, requirement_id, kind, payload_json, review_status, review_comment, position)
-            VALUES (?, ?, ?, 'ai', ?, 'pending', '', 0)""",
+            VALUES (%s, %s, %s, 'ai', %s, 'pending', '', 0)""",
             (ai_id, session, "R-02", json.dumps(payload)))
     response = review(session, "R-02", "needs_investigation", "AI concern needs checking.")
     assert response.status_code == 200
