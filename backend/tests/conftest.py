@@ -11,7 +11,7 @@ _ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(_ENV_FILE)
 
 
-_PURE_MODULES = {"test_comparison.py", "test_correction_status.py"}
+_PURE_MODULES = {"test_comparison.py", "test_correction_status.py", "test_review_save_fast_path.py"}
 _PURE_TESTS = {("test_phase3.py", "test_cache_key_changes_with_each_relevant_input")}
 
 

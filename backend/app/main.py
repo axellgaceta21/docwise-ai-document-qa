@@ -22,7 +22,7 @@ from .db import (change_correction_status, create_revision, get_cached_ai, get_c
                  database, init_db, record_report, save_comparison, save_correction,
                  update_requirement_review, update_review)
 from .models import (CompareResponse, CorrectionInput, CorrectionRecord, CorrectionStatusUpdate,
-                     Requirement, RequirementReview, ReviewResponse, ReviewUpdate, RevisionRecord)
+                     Requirement, RequirementReviewUpdateResponse, ReviewResponse, ReviewUpdate, RevisionRecord)
 from .pdf import MAX_PDF_BYTES, extract_pdf
 from .report import build_report
 from .revision import build_revision
@@ -138,6 +138,7 @@ def _set_visitor_cookie(response: Response, visitor_id: str) -> None:
 
 @app.middleware("http")
 async def visitor_and_rate_limit(request: Request, call_next):
+    started = time.perf_counter()
     visitor_id = verify_visitor_cookie(request.cookies.get(COOKIE_NAME))
     if visitor_id is None:
         visitor_id = new_visitor_id()
@@ -150,10 +151,12 @@ async def visitor_and_rate_limit(request: Request, call_next):
             _set_visitor_cookie(response, visitor_id)
             return response
         client_address = request.client.host if request.client else "unknown"
+        rate_started = time.perf_counter()
         allowed = record_api_request(
             visitor_id, hash_client_ip(client_address),
             _positive_int("DOCWISE_RATE_LIMIT_PER_MINUTE", 120),
             _positive_int("DOCWISE_IP_RATE_LIMIT_PER_MINUTE", 300))
+        rate_ms = (time.perf_counter() - rate_started) * 1000
         if not allowed:
             response = JSONResponse({"detail": "Request rate limit exceeded. Please try again shortly."},
                                     status_code=429, headers={"Retry-After": "60"})
@@ -163,6 +166,10 @@ async def visitor_and_rate_limit(request: Request, call_next):
     response = await call_next(request)
     if request.url.path.startswith("/api/"):
         _set_visitor_cookie(response, visitor_id)
+    if request.url.path.endswith("/review") and request.method == "PATCH":
+        timing = response.headers.get("Server-Timing")
+        response.headers["Server-Timing"] = (timing + ", " if timing else "") + (
+            f"rate_limit;dur={rate_ms:.1f}, backend;dur={(time.perf_counter() - started) * 1000:.1f}")
     return response
 
 
@@ -184,7 +191,8 @@ def enforce_quota(visitor_id: str, request: Request, action: str,
 
 
 app.add_middleware(CORSMiddleware, allow_origins=cors_origins, allow_credentials=True,
-                   allow_methods=["GET", "POST", "PATCH", "PUT", "OPTIONS"], allow_headers=["*"])
+                   allow_methods=["GET", "POST", "PATCH", "PUT", "OPTIONS"], allow_headers=["*"],
+                   expose_headers=["Server-Timing"])
 
 
 @app.get("/api/health")
@@ -274,17 +282,18 @@ def review_finding(session_id: str, finding_id: str, update: ReviewUpdate,
     return result
 
 
-@app.patch("/api/comparisons/{session_id}/requirements/{requirement_id}/review", response_model=RequirementReview)
+@app.patch("/api/comparisons/{session_id}/requirements/{requirement_id}/review", response_model=RequirementReviewUpdateResponse)
 def review_requirement(session_id: str, requirement_id: str, update: ReviewUpdate,
-                       visitor_id: str = Depends(get_visitor_id)) -> RequirementReview:
-    require_session_owner(session_id, visitor_id)
+                       response: Response, visitor_id: str = Depends(get_visitor_id)) -> RequirementReviewUpdateResponse:
+    started = time.perf_counter()
     try:
-        result = update_requirement_review(session_id, requirement_id, update)
+        result = update_requirement_review(session_id, requirement_id, update, visitor_id)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
     if result is None:
         raise HTTPException(404, "Requirement not found")
-    return result
+    response.headers["Server-Timing"] = f"review_db;dur={(time.perf_counter() - started) * 1000:.1f}"
+    return RequirementReviewUpdateResponse.model_validate(result)
 
 
 @app.get("/api/comparisons/{session_id}/report")

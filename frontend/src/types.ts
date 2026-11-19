@@ -3,6 +3,7 @@ export type Requirement = { id: string; title: string; reference_text: string }
 export type Citation = { page: number; excerpt: string }
 export type Reviewable = { id: string | null; review_status: ReviewStatus; review_comment: string }
 export type RequirementReview = { requirement_id: string; status: ReviewStatus; comment: string; ambiguous_legacy: boolean; source: 'explicit' | 'legacy' | 'default' }
+export type RequirementReviewUpdate = RequirementReview & { audit_event: AuditEvent }
 export type ReviewDisplay = ReviewStatus | 'no_review_needed' | 'needs_review' | 'legacy_conflict'
 export type CorrectionStatus = 'draft' | 'pending_verification' | 'verified' | 'rejected'
 export type CorrectionDisplayStatus = 'not_required' | 'awaiting_review' | 'needs_correction' | 'draft' | 'pending_verification' | 'verified' | 'correction_rejected'
@@ -88,12 +89,12 @@ export const REVIEW_LABELS: Record<ReviewStatus, string> = {
 
 export const CORRECTION_LABELS: Record<CorrectionStatus, string> = {
   draft: 'Draft correction', pending_verification: 'Pending verification',
-  verified: 'Verified', rejected: 'Rejected correction',
+  verified: 'Correction Approved', rejected: 'Rejected correction',
 }
 export const CORRECTION_DISPLAY_LABELS: Record<CorrectionDisplayStatus, string> = {
   not_required: 'Not Required', awaiting_review: 'Awaiting Review',
   needs_correction: 'Needs Correction', draft: 'Draft',
-  pending_verification: 'Pending Verification', verified: 'Verified',
+  pending_verification: 'Pending Verification', verified: 'Correction Approved',
   correction_rejected: 'Correction Rejected',
 }
 export const AI_TYPE_LABELS: Record<AiFinding['discrepancy_type'], string> = {
@@ -185,7 +186,7 @@ export function auditActionLabel(event: AuditEvent): string {
   }
   if (event.action === 'correction_created' || event.action === 'correction_revised') return 'Correction saved'
   if (event.action === 'correction_status_changed') {
-    return event.new_status === 'verified' ? 'Correction verified'
+    return event.new_status === 'verified' ? 'Correction Approved by Reviewer'
       : event.new_status === 'rejected' ? 'Correction rejected'
       : event.new_status === 'pending_verification' ? 'Sent for verification' : 'Correction returned to draft'
   }

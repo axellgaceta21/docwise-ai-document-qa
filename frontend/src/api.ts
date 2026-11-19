@@ -1,4 +1,4 @@
-import type { Comparison, Correction, CorrectionInput, CorrectionStatus, Requirement, RequirementReview, ReviewStatus, Revision, SessionSummary } from './types'
+import type { Comparison, Correction, CorrectionInput, CorrectionStatus, Requirement, RequirementReviewUpdate, ReviewStatus, Revision, SessionSummary } from './types'
 
 const API_BASE_URL = ((globalThis as typeof globalThis & { __DOCWISE_API_BASE_URL__?: string })
   .__DOCWISE_API_BASE_URL__ ?? '').replace(/\/+$/, '')
@@ -6,8 +6,14 @@ const apiUrl = (path: string) => `${API_BASE_URL}${path}`
 const requestOptions = { credentials: 'include' as const }
 
 async function responseJson<T>(response: Response): Promise<T> {
-  const body = await response.json()
-  if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : 'The request could not be completed.')
+  const body = await response.json().catch(() => null)
+  if (!response.ok) {
+    const detail = body && typeof body.detail === 'string' ? body.detail : null
+    throw new Error(detail ?? (response.status === 429 ? 'Too many requests. Wait a moment and try again.'
+      : response.status >= 500 ? 'The server could not complete the request. Try again shortly.'
+      : `The request could not be completed (${response.status}).`))
+  }
+  if (body === null) throw new Error('The server returned an unexpected response. Reopen this comparison to check whether the change was saved.')
   return body as T
 }
 
@@ -36,15 +42,40 @@ export async function saveReview(sessionId: string, findingId: string, status: R
   }))
 }
 
-export async function saveRequirementReview(sessionId: string, requirementId: string, status: ReviewStatus, comment: string): Promise<RequirementReview> {
-  return responseJson(await fetch(apiUrl(`/api/comparisons/${encodeURIComponent(sessionId)}/requirements/${encodeURIComponent(requirementId)}/review`), {
-    ...requestOptions,
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status, comment }),
-  }))
+export async function saveRequirementReview(sessionId: string, requirementId: string, status: ReviewStatus, comment: string): Promise<RequirementReviewUpdate> {
+  const started = performance.now()
+  try {
+    const response = await fetch(apiUrl(`/api/comparisons/${encodeURIComponent(sessionId)}/requirements/${encodeURIComponent(requirementId)}/review`), {
+      ...requestOptions,
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status, comment }),
+    })
+    const result = await responseJson<RequirementReviewUpdate>(response)
+    console.info('Docwise review save timing', { round_trip_ms: Math.round(performance.now() - started), server_timing: response.headers.get('Server-Timing') })
+    return result
+  } catch (cause) {
+    console.info('Docwise review save failed', { round_trip_ms: Math.round(performance.now() - started) })
+    if (cause instanceof TypeError) throw new Error('Network connection failed. Reopen the comparison to check whether your decision was saved, then try again.')
+    throw cause
+  }
 }
 
 export function reportUrl(sessionId: string): string {
   return apiUrl(`/api/comparisons/${encodeURIComponent(sessionId)}/report`)
+}
+
+export async function downloadPdf(path: string, filename: string): Promise<void> {
+  const response = await fetch(path, requestOptions)
+  if (!response.ok) await responseJson(response)
+  const blob = await response.blob()
+  if (!blob.size || !blob.type.includes('pdf')) throw new Error('The server did not return a PDF. Please try again.')
+  const objectUrl = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = objectUrl
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
 }
 
 const comparisonUrl = (sessionId: string) => `/api/comparisons/${encodeURIComponent(sessionId)}`

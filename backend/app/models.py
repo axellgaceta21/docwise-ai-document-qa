@@ -98,6 +98,10 @@ class RequirementReview(BaseModel):
     source: Literal["explicit", "legacy", "default"] = "default"
 
 
+class RequirementReviewUpdateResponse(RequirementReview):
+    audit_event: dict
+
+
 CorrectionStatus = Literal["draft", "pending_verification", "verified", "rejected"]
 
 

@@ -158,11 +158,15 @@ def init_db() -> None:
 
 def _event(connection, session_id: str, action: str, *, finding_id: str | None = None,
            old_status: str | None = None, new_status: str | None = None,
-           comment: str | None = None, detail: str | None = None) -> None:
+           comment: str | None = None, detail: str | None = None) -> dict:
+    event = dict(id=str(uuid4()), finding_id=finding_id, action=action,
+                 old_status=old_status, new_status=new_status, comment=comment,
+                 detail=detail, occurred_at=utc_now())
     connection.execute("""INSERT INTO audit_events
         (id, session_id, finding_id, action, old_status, new_status, comment, detail, occurred_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-        (str(uuid4()), session_id, finding_id, action, old_status, new_status, comment, detail, utc_now()))
+        (event["id"], session_id, finding_id, action, old_status, new_status, comment, detail, event["occurred_at"]))
+    return event
 
 
 def _requirement_review(connection, session_id: str, requirement_id: str) -> RequirementReview:
@@ -191,20 +195,28 @@ def get_requirement_reviews(session_id: str) -> list[RequirementReview]:
         return [_requirement_review(connection, session_id, requirement_id) for requirement_id in ids]
 
 
-def update_requirement_review(session_id: str, requirement_id: str, update: ReviewUpdate) -> RequirementReview | None:
+def update_requirement_review(session_id: str, requirement_id: str, update: ReviewUpdate,
+                              owner_id: str) -> dict | None:
     init_db()
     with database() as connection:
-        connection.execute("SELECT id FROM sessions WHERE id=%s FOR UPDATE", (session_id,))
+        owner = connection.execute("SELECT id FROM sessions WHERE id=%s AND owner_id=%s FOR UPDATE",
+                                   (session_id, owner_id)).fetchone()
+        if owner is None:
+            return None
         requirement = connection.execute("""SELECT 1 FROM requirements
             WHERE session_id=%s AND requirement_id=%s FOR UPDATE""", (session_id, requirement_id)).fetchone()
         if requirement is None:
             return None
         before = _requirement_review(connection, session_id, requirement_id)
-        finding = connection.execute("""SELECT payload_json FROM findings
-            WHERE session_id=%s AND requirement_id=%s AND kind='deterministic'""", (session_id, requirement_id)).fetchone()
-        ai_count = connection.execute("""SELECT COUNT(*) AS count FROM findings
-            WHERE session_id=%s AND requirement_id=%s AND kind='ai'""", (session_id, requirement_id)).fetchone()["count"]
-        clean = finding and json.loads(finding["payload_json"])["status"] == "match" and not ai_count
+        evidence = connection.execute("""SELECT
+            (SELECT payload_json FROM findings WHERE session_id=%s AND requirement_id=%s
+             AND kind='deterministic' LIMIT 1) AS deterministic_payload,
+            EXISTS (SELECT 1 FROM findings WHERE session_id=%s AND requirement_id=%s
+             AND kind='ai') AS has_ai""",
+            (session_id, requirement_id, session_id, requirement_id)).fetchone()
+        clean = (evidence["deterministic_payload"] and
+                 json.loads(evidence["deterministic_payload"])["status"] == "match" and
+                 not evidence["has_ai"])
         if clean and not before.ambiguous_legacy:
             raise ValueError("A clean match does not need a review decision")
         comment = update.comment.strip()
@@ -213,11 +225,11 @@ def update_requirement_review(session_id: str, requirement_id: str, update: Revi
             ON CONFLICT(session_id, requirement_id) DO UPDATE SET
             status=excluded.status, comment=excluded.comment, updated_at=excluded.updated_at""",
             (session_id, requirement_id, update.status, comment, utc_now()))
-        _event(connection, session_id, "requirement_review_updated",
+        event = _event(connection, session_id, "requirement_review_updated",
                old_status=before.status if not before.ambiguous_legacy else None,
                new_status=update.status, comment=comment, detail=requirement_id)
-    return RequirementReview(requirement_id=requirement_id, status=update.status,
-                             comment=comment, source="explicit")
+    return dict(requirement_id=requirement_id, status=update.status,
+                comment=comment, source="explicit", ambiguous_legacy=False, audit_event=event)
 
 
 def save_comparison(result: CompareResponse, requirements: list[Requirement], hashes: dict[str, str],
